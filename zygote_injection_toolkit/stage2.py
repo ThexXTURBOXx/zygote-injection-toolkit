@@ -74,7 +74,7 @@ known_services = {"oem_lock": oem_lock_service}
 
 
 class Stage2Exploit:
-    def __init__(self, port: int = 1234) -> None:
+    def __init__(self, port: int = 4321) -> None:
         self.port = port
 
     def call_service(
